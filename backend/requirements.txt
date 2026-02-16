@@ -1,0 +1,29 @@
+# Core Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
+
+# AI & Speech Processing
+openai==1.12.0
+openai-whisper==20231117
+torch==2.2.0
+torchaudio==2.2.0
+
+# Voice & Audio
+elevenlabs==0.2.27
+pydub==0.25.1
+
+# Emergency & Communications
+twilio==9.0.1
+
+# Language Detection (for multi-language support)
+langdetect==1.0.9
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.6.1
+pydantic-settings==2.1.0
+
+# Development
+pytest==8.0.0
+httpx==0.26.0
