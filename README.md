@@ -26,7 +26,7 @@
 <br />
 <div align="center">
   <a href="">
-    <img src="owl.png" alt="Owl Logo" width="350" height="250">
+    <img src="imgs/owl.png" alt="Owl Logo" width="350" height="250">
   </a>
 </div>
 
@@ -78,7 +78,7 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 <div align="center">
-<img src="owl.png" alt="Screenshot of project" width="600" >
+<img src="imgs/owl.png" alt="Screenshot of project" width="600" >
 </div>
 
 This project is an AI-powered assistive voice system designed for individuals who have lost the ability to speak clearly due to conditions such as stroke, ALS, or Parkinson’s disease. It listens to impaired or unclear speech, interprets the intended meaning using multimodal AI, and responds in the user’s preserved natural voice rather than a robotic alternative. The goal is to restore dignity, independence, and real-time communication without requiring expensive hardware or weeks of training. The system can also detect emergency phrases and integrate with smart home controls to support daily living. By combining speech interpretation with voice preservation technology, this project focuses on empowering patients to be understood — in their own voice.
