@@ -89,7 +89,11 @@ Respond in this EXACT JSON format:
             response_format={"type": "json_object"}
         )
 
-        analysis = json.loads(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("OpenAI returned empty response")
+
+        analysis = json.loads(content)
 
         return {
             "transcribed_text": transcribed_text,
