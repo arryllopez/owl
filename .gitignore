@@ -1,0 +1,37 @@
+# Environment
+.env
+.env.local
+.env.example
+
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Audio files
+*.wav
+*.mp3
+*.m4a
+uploads/
+audio_samples/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/

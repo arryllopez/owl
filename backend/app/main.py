@@ -1,29 +1,35 @@
 """
 Owl Backend - AI-Powered Speech Accessibility
-FastAPI server for speech transcription, voice cloning, and emergency detection
+FastAPI server using Claude API for speech transcription and emergency detection
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import os
+import tempfile
 from dotenv import load_dotenv
+
+# Import services
+from app.services.openai_service import transcribe_and_analyze_audio
+from app.services.elevenlabs import text_to_speech
+from app.services.twilio import send_emergency_alert
 
 # Load environment variables
 load_dotenv()
 
 app = FastAPI(
     title="Owl API",
-    description="AI-powered speech interpretation and emergency detection system",
-    version="1.0.0"
+    description="AI-powered speech interpretation with OpenAI (Whisper + GPT-4)",
+    version="2.0.0"
 )
 
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Vite default port
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,25 +40,17 @@ app.add_middleware(
 # ============================================================================
 
 class TranscriptionResponse(BaseModel):
-    text: str
-    confidence: float
-    language: str
-    alternatives: List[dict]
+    transcribed_text: str
     is_emergency: bool
-
-class SpeakRequest(BaseModel):
-    text: str
-    voice_id: Optional[str] = None
-    language: Optional[str] = "en"
+    emergency_confidence: float
+    intent: str
+    suggested_response: str
+    audio_url: Optional[str] = None  # URL to generated voice response
 
 class EmergencyAlert(BaseModel):
     message: str
     location: Optional[str] = None
     contact_number: str
-
-class VoiceCloneRequest(BaseModel):
-    name: str
-    description: Optional[str] = None
 
 # ============================================================================
 # Health Check
@@ -61,9 +59,9 @@ class VoiceCloneRequest(BaseModel):
 @app.get("/")
 async def root():
     return {
-        "message": "Owl API is running",
+        "message": "Owl API v2.0 - Powered by OpenAI",
         "status": "healthy",
-        "version": "1.0.0"
+        "version": "2.0.0"
     }
 
 @app.get("/health")
@@ -71,158 +69,142 @@ async def health_check():
     return {
         "status": "healthy",
         "services": {
-            "whisper": os.getenv("OPENAI_API_KEY") is not None,
+            "openai": os.getenv("OPENAI_API_KEY") is not None,
             "elevenlabs": os.getenv("ELEVENLABS_API_KEY") is not None,
             "twilio": os.getenv("TWILIO_ACCOUNT_SID") is not None
         }
     }
 
 # ============================================================================
-# Speech Recognition
+# Main Processing Endpoint
 # ============================================================================
 
-@app.post("/api/transcribe", response_model=TranscriptionResponse)
-async def transcribe_audio(file: UploadFile = File(...)):
+@app.post("/api/process-speech", response_model=TranscriptionResponse)
+async def process_speech(file: UploadFile = File(...)):
     """
-    Transcribe audio file using fine-tuned Whisper ASR
-
-    Fine-tuned Whisper outputs clean transcription directly from unclear speech.
-    No post-processing/corrections needed - the model handles dysarthric speech.
+    Main endpoint: Process speech with OpenAI
 
     Flow:
-    1. Receive audio file (unclear speech)
-    2. Fine-tuned Whisper transcribes → clean text
-    3. Detect emergency phrases
-    4. Return transcription + emergency flag
+    1. Receive audio file from user
+    2. Whisper transcribes audio → text
+    3. GPT-4 analyzes text + detects emergency
+    4. If EMERGENCY detected:
+       - Send alert via Twilio
+       - Return transcription + emergency flag
+    5. If NOT emergency:
+       - Generate voice response with ElevenLabs
+       - Return transcription + audio response
     """
+    temp_audio_path = None
+    temp_response_path = None
+
     try:
-        # TODO: Implement fine-tuned Whisper transcription
-        # 1. Save uploaded audio file temporarily
-        # 2. Load fine-tuned Whisper model
-        # 3. Transcribe audio → clean text
-        # 4. Extract confidence scores and alternatives from beam search
-        # 5. Detect emergency
+        # Save uploaded audio to temp file
+        temp_audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
+        with open(temp_audio_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
 
-        # Mock response for now
-        transcribed_text = "I want coffee, hot"  # Fine-tuned model output
-        confidence = 0.87
-        language = "en"
+        # Step 1: OpenAI analyzes audio (Whisper + GPT-4)
+        result = transcribe_and_analyze_audio(temp_audio_path)
 
-        # Alternatives from beam search (top 3 hypotheses)
-        alternatives = [
-            {"text": "I want coffee, hot", "confidence": 0.87},
-            {"text": "I want coffee cold", "confidence": 0.65},
-            {"text": "I need coffee now", "confidence": 0.58}
-        ]
+        # Step 2: Handle based on emergency status
+        if result["is_emergency"] and result["emergency_confidence"] > 0.7:
+            # EMERGENCY: Send alert via Twilio
+            emergency_contact = os.getenv("EMERGENCY_CONTACT_NUMBER")
+            if emergency_contact:
+                send_emergency_alert(
+                    message=result["transcribed_text"],
+                    contact_number=emergency_contact,
+                    location=None  # TODO: Get from app if available
+                )
 
-        # Check for emergency
-        is_emergency = detect_emergency(transcribed_text, confidence)
+            return TranscriptionResponse(
+                transcribed_text=result["transcribed_text"],
+                is_emergency=True,
+                emergency_confidence=result["emergency_confidence"],
+                intent=result["intent"],
+                suggested_response="Emergency services have been notified.",
+                audio_url=None
+            )
 
-        return TranscriptionResponse(
-            text=transcribed_text,
-            confidence=confidence,
-            language=language,
-            alternatives=alternatives,
-            is_emergency=is_emergency
-        )
+        else:
+            # NOT EMERGENCY: Generate voice response
+            voice_audio = text_to_speech(
+                text=result["suggested_response"],
+                voice_id=os.getenv("ELEVENLABS_VOICE_ID")
+            )
+
+            if voice_audio:
+                # Save voice response
+                temp_response_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
+                with open(temp_response_path, "wb") as f:
+                    f.write(voice_audio)
+
+                # TODO: Upload to storage and get permanent URL
+                audio_url = f"/api/audio/{os.path.basename(temp_response_path)}"
+            else:
+                audio_url = None
+
+            return TranscriptionResponse(
+                transcribed_text=result["transcribed_text"],
+                is_emergency=False,
+                emergency_confidence=result["emergency_confidence"],
+                intent=result["intent"],
+                suggested_response=result["suggested_response"],
+                audio_url=audio_url
+            )
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+
+    finally:
+        # Cleanup temp files
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            try:
+                os.unlink(temp_audio_path)
+            except:
+                pass
 
 # ============================================================================
-# Text-to-Speech (Voice Cloning)
+# Audio Playback
 # ============================================================================
 
-@app.post("/api/speak")
-async def text_to_speech(request: SpeakRequest):
+@app.get("/api/audio/{filename}")
+async def get_audio(filename: str):
     """
-    Convert text to speech using ElevenLabs voice cloning
-    Returns audio file in user's cloned voice
+    Serve generated audio responses
     """
-    try:
-        # TODO: Implement ElevenLabs TTS
-        return {
-            "status": "success",
-            "message": "TTS generation not yet implemented",
-            "text": request.text,
-            "voice_id": request.voice_id
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
+    temp_dir = tempfile.gettempdir()
+    audio_path = os.path.join(temp_dir, filename)
 
-@app.post("/api/voice/clone")
-async def clone_voice(files: List[UploadFile] = File(...)):
-    """
-    Create voice clone from uploaded audio samples
-    Requires 20-30 seconds of clear audio
-    """
-    try:
-        # TODO: Implement ElevenLabs voice cloning
-        return {
-            "status": "success",
-            "message": "Voice cloning not yet implemented",
-            "samples_received": len(files)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Voice cloning failed: {str(e)}")
+    if os.path.exists(audio_path):
+        return FileResponse(audio_path, media_type="audio/mpeg")
+    else:
+        raise HTTPException(status_code=404, detail="Audio file not found")
 
 # ============================================================================
-# Emergency Detection & Calling
+# Manual Emergency Trigger (for testing)
 # ============================================================================
 
 @app.post("/api/emergency")
 async def trigger_emergency(alert: EmergencyAlert):
     """
-    Send emergency alert via Twilio SMS/Call
+    Manually trigger emergency alert (for testing)
     """
     try:
-        # TODO: Implement Twilio emergency calling
+        send_emergency_alert(
+            message=alert.message,
+            contact_number=alert.contact_number,
+            location=alert.location
+        )
         return {
             "status": "success",
-            "message": "Emergency alert not yet implemented",
+            "message": "Emergency alert sent",
             "alert_sent_to": alert.contact_number
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Emergency alert failed: {str(e)}")
-
-# ============================================================================
-# Emergency Detection
-# ============================================================================
-
-def detect_emergency(text: str, confidence: float) -> bool:
-    """
-    Detect emergency phrases in transcription
-
-    Since fine-tuned Whisper outputs clean text, we can reliably
-    detect emergency phrases without fuzzy matching.
-
-    Args:
-        text: Clean transcription from fine-tuned Whisper
-        confidence: Transcription confidence score
-
-    Returns:
-        True if emergency detected with >90% confidence
-    """
-    # Only trigger emergency if confidence is high enough
-    if confidence < 0.90:
-        return False
-
-    # Emergency phrases (English + Spanish)
-    emergency_phrases = [
-        # English
-        "help", "emergency", "call for help", "need help",
-        "ambulance", "fell down", "can't breathe", "call 911",
-        "help me", "call ambulance", "need doctor",
-
-        # Spanish
-        "ayuda", "urgencia", "emergencia", "llamar ambulancia"
-    ]
-
-    text_lower = text.lower()
-    for phrase in emergency_phrases:
-        if phrase in text_lower:
-            return True
-
-    return False
 
 # ============================================================================
 # Run Server
