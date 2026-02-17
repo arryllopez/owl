@@ -96,7 +96,7 @@ This project is an AI-powered assistive voice system designed for individuals wh
 
 * Mobile-first accessibility
 
-*Human-in-the-loop design
+* Human-in-the-loop design
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
